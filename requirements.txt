@@ -1,0 +1,12 @@
+# UI Extraction Agent Dependencies
+
+# Core Google ADK (for both programmatic use and web UI)
+google-adk>=0.1.0
+
+# Browser automation
+playwright>=1.40.0
+
+# Async support (usually built-in with Python 3.7+)
+# asyncio
+
+# Additional utilities (may already be in stdlib)
