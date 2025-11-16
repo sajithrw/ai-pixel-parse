@@ -76,7 +76,8 @@ async def test_dashboard_login():
         username_selector="#name",
         password_selector="#password",
         submit_selector="button",  # Login button selector
-        max_pages=10
+        max_pages=10,
+        dynamic_content_wait=15  # Wait 15s for KPIs and dynamic charts to load
     )
     
     print("Starting extraction with login flow...")

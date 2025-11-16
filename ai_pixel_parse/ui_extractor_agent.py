@@ -507,7 +507,7 @@ class UIExtractor:
         return page_data
     
     async def crawl_application(self, base_url: str, login_config: Optional[Dict[str, str]] = None, 
-                               max_pages: int = 50) -> List[Dict[str, Any]]:
+                               max_pages: int = 50, dynamic_content_wait: int = 0) -> List[Dict[str, Any]]:
         """
         Crawl entire application and extract UI specifications.
         
@@ -515,6 +515,7 @@ class UIExtractor:
             base_url: Starting URL of the application
             login_config: Dict with 'url', 'username', 'password' and optional selectors
             max_pages: Maximum number of pages to crawl
+            dynamic_content_wait: Additional wait time in seconds for dynamic content (KPIs, charts)
         """
         await self.initialize_browser()
         page = await self.context.new_page()
@@ -550,8 +551,12 @@ class UIExtractor:
                     if 'Timeout' in str(e):
                         print(f"  → Networkidle timeout, using 'load' strategy...")
                         await page.goto(current_url, wait_until='load', timeout=30000)
-                        # Wait a bit for dynamic content
-                        await page.wait_for_timeout(3000)
+                        # Wait for dynamic content (default 3s, configurable)
+                        if dynamic_content_wait > 0:
+                            print(f"  → Waiting {dynamic_content_wait}s for dynamic content (KPIs, charts, etc.)...")
+                            await page.wait_for_timeout(dynamic_content_wait * 1000)
+                        else:
+                            await page.wait_for_timeout(3000)
                     else:
                         raise
                 print(f"  → Page loaded successfully")
@@ -1061,7 +1066,8 @@ def create_extraction_config(
     password_selector: Optional[str] = None,
     submit_selector: Optional[str] = None,
     max_pages: int = 50,
-    output_dir: Optional[str] = None
+    output_dir: Optional[str] = None,
+    dynamic_content_wait: int = 0
 ) -> Dict[str, Any]:
     """Create configuration dictionary for UI extraction.
     
@@ -1079,6 +1085,8 @@ def create_extraction_config(
         submit_selector: CSS selector for submit button (optional).
         max_pages: Maximum pages to crawl (default: 50).
         output_dir: Custom output directory (optional).
+        dynamic_content_wait: Additional wait time in seconds for dynamic content
+            like KPIs, charts, or async loaded components (default: 0).
     
     Returns:
         Configuration dictionary ready for extract_ui_specifications().
@@ -1090,13 +1098,15 @@ def create_extraction_config(
             login_url="https://example.com/login",
             username="demo@example.com",
             password="demo123",
-            max_pages=30
+            max_pages=30,
+            dynamic_content_wait=15  # Wait 15 seconds for KPIs to load
         )
     """
     config = {
         'base_url': base_url,
         'app_name': app_name,
-        'max_pages': max_pages
+        'max_pages': max_pages,
+        'dynamic_content_wait': dynamic_content_wait
     }
     
     if login_url:
@@ -1155,7 +1165,8 @@ async def extract_ui_specifications(config: Dict[str, Any]) -> str:
     pages = await extractor.crawl_application(
         base_url=config['base_url'],
         login_config=config.get('login_config'),
-        max_pages=config['max_pages']
+        max_pages=config['max_pages'],
+        dynamic_content_wait=config.get('dynamic_content_wait', 0)
     )
     
     # Save specifications
