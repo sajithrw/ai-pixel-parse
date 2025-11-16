@@ -543,7 +543,17 @@ class UIExtractor:
                 
             try:
                 print(f"Extracting: {current_url}")
-                await page.goto(current_url, wait_until='networkidle', timeout=30000)
+                # Try networkidle first, fallback to load if it times out
+                try:
+                    await page.goto(current_url, wait_until='networkidle', timeout=30000)
+                except Exception as e:
+                    if 'Timeout' in str(e):
+                        print(f"  → Networkidle timeout, using 'load' strategy...")
+                        await page.goto(current_url, wait_until='load', timeout=30000)
+                        # Wait a bit for dynamic content
+                        await page.wait_for_timeout(3000)
+                    else:
+                        raise
                 print(f"  → Page loaded successfully")
                 
                 # Extract page data
