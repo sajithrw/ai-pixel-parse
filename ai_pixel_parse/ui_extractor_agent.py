@@ -1258,13 +1258,14 @@ async def extract_ui_tool(
     password_selector: str = "",
     submit_selector: str = "",
     max_pages: int = 30,
-    output_dir: str = ""
+    output_dir: str = "",
+    dynamic_content_wait: int = 0
 ) -> str:
     """Extract behavioral UI specifications from a web application.
     
     This tool automates browser crawling to extract comprehensive behavioral
     specifications from web applications. It captures interactive elements,
-    form validation rules, table interactions, and navigation patterns.
+    form validation rules, table interactions, navigation patterns, and iframe content.
     
     Args:
         base_url: Starting URL to crawl (e.g., "https://example.com").
@@ -1277,6 +1278,7 @@ async def extract_ui_tool(
         submit_selector: CSS selector for login submit button.
         max_pages: Maximum number of pages to crawl (default: 30).
         output_dir: Custom output directory path (optional).
+        dynamic_content_wait: Seconds to wait for dynamic content (KPIs, charts) to load (default: 0).
     
     Returns:
         Status message with path to extraction output directory.
@@ -1285,7 +1287,8 @@ async def extract_ui_tool(
         result = await extract_ui_tool(
             base_url="https://example.com",
             app_name="ExampleApp",
-            max_pages=20
+            max_pages=20,
+            dynamic_content_wait=15
         )
     """
     # Build login config if credentials provided
@@ -1310,14 +1313,18 @@ async def extract_ui_tool(
     print(f"   Base URL: {base_url}")
     if login_config:
         print(f"   Login: Enabled")
-    print(f"   Max pages: {max_pages}\n")
+    print(f"   Max pages: {max_pages}")
+    if dynamic_content_wait > 0:
+        print(f"   Dynamic content wait: {dynamic_content_wait}s")
+    print()
     
     try:
         # Perform extraction
         pages = await extractor.crawl_application(
             base_url=base_url,
             login_config=login_config,
-            max_pages=max_pages
+            max_pages=max_pages,
+            dynamic_content_wait=dynamic_content_wait
         )
         
         if not pages:
@@ -1328,7 +1335,15 @@ async def extract_ui_tool(
         
         print(f"\n✅ Extraction complete! Processed {len(pages)} pages")
         
-        return f"Successfully extracted UI from {base_url}. Output saved to: {output_path}\n\nExtracted {len(pages)} pages with:\n- {sum(len(p['components']['buttons']) for p in pages)} buttons\n- {sum(len(p['components']['forms']) for p in pages)} forms\n- {sum(len(p['components']['tables']) for p in pages)} tables\n- {sum(len(p['components']['icons']) for p in pages)} icons\n\nYou can find detailed specifications in the output directory."
+        iframe_count = sum(len(p['components'].get('iframes', [])) for p in pages)
+        return (f"Successfully extracted UI from {base_url}. Output saved to: {output_path}\n\n"
+                f"Extracted {len(pages)} pages with:\n"
+                f"- {sum(len(p['components']['buttons']) for p in pages)} buttons\n"
+                f"- {sum(len(p['components']['forms']) for p in pages)} forms\n"
+                f"- {sum(len(p['components']['tables']) for p in pages)} tables\n"
+                f"- {sum(len(p['components']['icons']) for p in pages)} icons\n"
+                f"- {iframe_count} iframes (with embedded KPIs, charts, etc.)\n\n"
+                f"You can find detailed specifications in the output directory.")
     except Exception as e:
         error_message = f"An error occurred during UI extraction: {str(e)}"
         print(f"❌ {error_message}")
@@ -1354,10 +1369,16 @@ ui_extractor_agent = Agent(
         '1. Confirm the target URL and application name\n'
         '2. Ask if authentication is required\n'
         '3. If login needed, request: login URL, username, and password\n'
-        '4. Use the extract_ui_tool to perform the extraction\n'
-        '5. Inform the user where the output is saved\n\n'
-        'The extracted specifications focus on behaviors and interactions, '
-        'not visual styling.'
+        '4. Ask if the page has dynamic content (dashboards, KPIs) that need extra load time\n'
+        '5. Use the extract_ui_tool to perform the extraction\n'
+        '6. Inform the user where the output is saved\n\n'
+        'The extracted specifications include:\n'
+        '- Interactive behaviors (buttons, forms, tables)\n'
+        '- Iframe content (embedded KPIs, charts, widgets)\n'
+        '- Navigation patterns and page structure\n'
+        '- Form validation rules and data attributes\n\n'
+        'For dashboards with dynamic KPIs/charts, recommend setting '
+        'dynamic_content_wait to 10-30 seconds.'
     ),
     tools=[extract_ui_tool],
 )
