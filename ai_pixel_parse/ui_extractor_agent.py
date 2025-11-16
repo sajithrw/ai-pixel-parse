@@ -120,6 +120,236 @@ class UIExtractor:
         
         print(f"✓ Logged in successfully to {login_url}")
         
+    async def extract_iframe_components(self, page: Page) -> List[Dict[str, Any]]:
+        """
+        Extract components from all iframes on the page.
+        
+        Many dashboards embed KPIs, charts, and other components in iframes.
+        This method detects iframes and extracts their content.
+        
+        Args:
+            page: Playwright Page object.
+            
+        Returns:
+            List of iframe data with their extracted components.
+        """
+        iframes_data = []
+        
+        try:
+            # Get all iframe elements
+            iframe_elements = await page.query_selector_all('iframe')
+            
+            print(f"  → Found {len(iframe_elements)} iframe(s) on page")
+            
+            for idx, iframe_element in enumerate(iframe_elements):
+                try:
+                    # Get iframe metadata
+                    iframe_info = await iframe_element.evaluate("""
+                        (iframe) => ({
+                            src: iframe.src,
+                            id: iframe.id || `iframe_${Date.now()}`,
+                            name: iframe.name,
+                            title: iframe.title,
+                            width: iframe.width,
+                            height: iframe.height,
+                            classes: iframe.className
+                        })
+                    """)
+                    
+                    print(f"    → Processing iframe #{idx + 1}: {iframe_info.get('src', 'about:blank')[:60]}")
+                    
+                    # Get the frame content
+                    frame = await iframe_element.content_frame()
+                    
+                    if frame is None:
+                        print(f"      ⚠ Cannot access iframe content (likely cross-origin)")
+                        iframe_info['components'] = {'error': 'Cross-origin iframe - access denied'}
+                        iframes_data.append(iframe_info)
+                        continue
+                    
+                    # Wait for iframe content to load
+                    try:
+                        await frame.wait_for_load_state('domcontentloaded', timeout=5000)
+                    except Exception as e:
+                        print(f"      ⚠ Iframe load timeout: {str(e)[:50]}")
+                    
+                    # Extract components from iframe
+                    iframe_components = {}
+                    
+                    # Extract KPI/metric components (common in dashboard iframes)
+                    iframe_components['metrics'] = await frame.evaluate(r"""
+                        () => {
+                            const metrics = [];
+                            
+                            // Look for common KPI/metric patterns
+                            const selectors = [
+                                '[class*="metric"]', '[class*="kpi"]', '[class*="stat"]',
+                                '[class*="count"]', '[class*="value"]', '[class*="number"]',
+                                '.card', '.widget', '[class*="dashboard"]'
+                            ];
+                            
+                            const processedElements = new Set();
+                            
+                            selectors.forEach(selector => {
+                                try {
+                                    document.querySelectorAll(selector).forEach((el, idx) => {
+                                        if (processedElements.has(el)) return;
+                                        processedElements.add(el);
+                                        
+                                        const rect = el.getBoundingClientRect();
+                                        if (rect.width === 0 || rect.height === 0) return;
+                                        
+                                        // Extract text content
+                                        const text = el.textContent.trim();
+                                        if (!text) return;
+                                        
+                                        // Try to identify label and value
+                                        const numbers = text.match(/[\d,]+\.?\d*/g);
+                                        const hasNumber = numbers && numbers.length > 0;
+                                        
+                                        metrics.push({
+                                            id: el.id || `metric_${idx}`,
+                                            text: text.substring(0, 200),
+                                            classes: el.className,
+                                            hasNumericValue: hasNumber,
+                                            values: numbers || [],
+                                            selector: selector,
+                                            tagName: el.tagName
+                                        });
+                                    });
+                                } catch (e) {
+                                    console.error('Error processing selector:', selector, e);
+                                }
+                            });
+                            
+                            return metrics;
+                        }
+                    """)
+                    
+                    # Extract charts/visualizations
+                    iframe_components['charts'] = await frame.evaluate("""
+                        () => {
+                            const charts = [];
+                            
+                            // Common chart library elements
+                            const chartSelectors = [
+                                'canvas', 'svg',
+                                '[class*="chart"]', '[class*="graph"]', '[class*="plot"]',
+                                '[class*="visual"]', '[id*="chart"]', '[id*="graph"]'
+                            ];
+                            
+                            chartSelectors.forEach(selector => {
+                                try {
+                                    document.querySelectorAll(selector).forEach((el, idx) => {
+                                        const rect = el.getBoundingClientRect();
+                                        if (rect.width < 50 || rect.height < 50) return;
+                                        
+                                        charts.push({
+                                            id: el.id || `chart_${idx}`,
+                                            type: el.tagName.toLowerCase(),
+                                            classes: el.className,
+                                            width: rect.width,
+                                            height: rect.height,
+                                            title: el.getAttribute('aria-label') || el.getAttribute('title') || 'Unnamed chart'
+                                        });
+                                    });
+                                } catch (e) {
+                                    console.error('Error processing chart selector:', selector, e);
+                                }
+                            });
+                            
+                            return charts;
+                        }
+                    """)
+                    
+                    # Extract buttons in iframe
+                    iframe_components['buttons'] = await frame.evaluate("""
+                        () => {
+                            const buttons = [];
+                            document.querySelectorAll('button, input[type="button"], input[type="submit"], [role="button"]').forEach((btn, idx) => {
+                                const rect = btn.getBoundingClientRect();
+                                if (rect.width === 0 || rect.height === 0) return;
+                                
+                                buttons.push({
+                                    id: btn.id || `btn_${idx}`,
+                                    text: btn.textContent.trim() || btn.value || '',
+                                    type: btn.type || 'button',
+                                    classes: btn.className,
+                                    disabled: btn.disabled
+                                });
+                            });
+                            return buttons;
+                        }
+                    """)
+                    
+                    # Extract tables in iframe
+                    iframe_components['tables'] = await frame.evaluate("""
+                        () => {
+                            const tables = [];
+                            document.querySelectorAll('table').forEach((table, idx) => {
+                                const headers = Array.from(table.querySelectorAll('thead th, thead td')).map(h => h.textContent.trim());
+                                const rowCount = table.querySelectorAll('tbody tr').length;
+                                
+                                tables.push({
+                                    id: table.id || `table_${idx}`,
+                                    headers: headers,
+                                    rowCount: rowCount,
+                                    columnCount: headers.length,
+                                    classes: table.className
+                                });
+                            });
+                            return tables;
+                        }
+                    """)
+                    
+                    # Extract forms in iframe
+                    iframe_components['forms'] = await frame.evaluate("""
+                        () => {
+                            const forms = [];
+                            document.querySelectorAll('form').forEach((form, idx) => {
+                                const inputs = Array.from(form.querySelectorAll('input, select, textarea')).map(inp => ({
+                                    type: inp.type || inp.tagName.toLowerCase(),
+                                    name: inp.name || inp.id,
+                                    placeholder: inp.placeholder || ''
+                                }));
+                                
+                                forms.push({
+                                    id: form.id || `form_${idx}`,
+                                    action: form.action,
+                                    method: form.method,
+                                    inputs: inputs,
+                                    classes: form.className
+                                });
+                            });
+                            return forms;
+                        }
+                    """)
+                    
+                    iframe_info['components'] = iframe_components
+                    
+                    # Summary stats
+                    metrics_count = len(iframe_components.get('metrics', []))
+                    charts_count = len(iframe_components.get('charts', []))
+                    buttons_count = len(iframe_components.get('buttons', []))
+                    tables_count = len(iframe_components.get('tables', []))
+                    forms_count = len(iframe_components.get('forms', []))
+                    
+                    print(f"      ✓ Extracted: {metrics_count} metrics, {charts_count} charts, "
+                          f"{buttons_count} buttons, {tables_count} tables, {forms_count} forms")
+                    
+                    iframes_data.append(iframe_info)
+                    
+                except Exception as e:
+                    print(f"      ⚠ Error extracting iframe #{idx + 1}: {str(e)[:100]}")
+                    iframe_info['components'] = {'error': str(e)}
+                    iframes_data.append(iframe_info)
+                    continue
+                    
+        except Exception as e:
+            print(f"  ⚠ Error during iframe extraction: {str(e)}")
+            
+        return iframes_data
+    
     async def extract_page_components(self, page: Page, url: str) -> Dict[str, Any]:
         """
         Extract comprehensive UI component information from a page.
@@ -504,6 +734,9 @@ class UIExtractor:
         
         page_data['functions'] = functions
         
+        # Extract iframe content
+        page_data['components']['iframes'] = await self.extract_iframe_components(page)
+        
         return page_data
     
     async def crawl_application(self, base_url: str, login_config: Optional[Dict[str, str]] = None, 
@@ -621,12 +854,14 @@ class UIExtractor:
             total_forms = sum(len(page['components']['forms']) for page in self.extracted_pages)
             total_tables = sum(len(page['components']['tables']) for page in self.extracted_pages)
             total_icons = sum(len(page['components']['icons']) for page in self.extracted_pages)
+            total_iframes = sum(len(page['components'].get('iframes', [])) for page in self.extracted_pages)
             
             f.write(f"Total UI Components:\n")
             f.write(f"  - Buttons: {total_buttons}\n")
             f.write(f"  - Forms: {total_forms}\n")
             f.write(f"  - Tables: {total_tables}\n")
-            f.write(f"  - Icons: {total_icons}\n\n")
+            f.write(f"  - Icons: {total_icons}\n")
+            f.write(f"  - Iframes: {total_iframes}\n\n")
             
             f.write(f"Pages Extracted:\n")
             for idx, page in enumerate(self.extracted_pages, 1):
@@ -897,6 +1132,78 @@ class UIExtractor:
                         
                         if behavior_list:
                             f.write(f"  Behaviors: {', '.join(behavior_list)}\n")
+                
+                # Iframes (embedded content like KPIs, charts, dashboards)
+                if 'iframes' in page['components'] and page['components']['iframes']:
+                    f.write(f"\n\nIFRAMES / EMBEDDED CONTENT ({len(page['components']['iframes'])})\n")
+                    f.write(f"-" * 80 + "\n")
+                    f.write(f"Note: Many dashboards embed KPIs, charts, and widgets in iframes.\n\n")
+                    
+                    for iframe_idx, iframe in enumerate(page['components']['iframes'], 1):
+                        f.write(f"\n[Iframe #{iframe_idx}] {iframe.get('id', 'unnamed')}\n")
+                        if iframe.get('src'):
+                            f.write(f"  Source: {iframe['src']}\n")
+                        if iframe.get('title'):
+                            f.write(f"  Title: {iframe['title']}\n")
+                        if iframe.get('width') or iframe.get('height'):
+                            f.write(f"  Dimensions: {iframe.get('width', 'auto')} × {iframe.get('height', 'auto')}\n")
+                        
+                        components = iframe.get('components', {})
+                        
+                        # Handle error cases
+                        if 'error' in components:
+                            f.write(f"  ⚠️ {components['error']}\n")
+                            continue
+                        
+                        # Metrics/KPIs in iframe
+                        metrics = components.get('metrics', [])
+                        if metrics:
+                            f.write(f"\n  METRICS/KPIs ({len(metrics)}):\n")
+                            for metric in metrics:  # Show all metrics
+                                f.write(f"    • {metric.get('text', 'N/A')[:100]}\n")
+                                if metric.get('hasNumericValue'):
+                                    f.write(f"      Values: {', '.join(metric.get('values', []))}\n")
+                                f.write(f"      Classes: {metric.get('classes', 'none')}\n")
+                        
+                        # Charts in iframe
+                        charts = components.get('charts', [])
+                        if charts:
+                            f.write(f"\n  CHARTS/VISUALIZATIONS ({len(charts)}):\n")
+                            for chart in charts:  # Show all charts
+                                chart_type = chart.get('type', 'unknown')
+                                title = chart.get('title', 'Unnamed chart')
+                                f.write(f"    • [{chart_type.upper()}] {title}\n")
+                                f.write(f"      Size: {chart.get('width', 0):.0f} × {chart.get('height', 0):.0f}px\n")
+                                if chart.get('classes'):
+                                    f.write(f"      Classes: {chart['classes']}\n")
+                        
+                        # Buttons in iframe
+                        buttons = components.get('buttons', [])
+                        if buttons:
+                            f.write(f"\n  BUTTONS ({len(buttons)}):\n")
+                            for btn in buttons:  # Show all buttons
+                                f.write(f"    • {btn.get('text', 'No text')} ({btn.get('type', 'button')})\n")
+                                if btn.get('disabled'):
+                                    f.write(f"      [DISABLED]\n")
+                                if btn.get('classes'):
+                                    f.write(f"      Classes: {btn['classes']}\n")
+                        
+                        # Tables in iframe
+                        tables = components.get('tables', [])
+                        if tables:
+                            f.write(f"\n  TABLES ({len(tables)}):\n")
+                            for tbl in tables:
+                                f.write(f"    • {tbl.get('rowCount', 0)} rows × {tbl.get('columnCount', 0)} columns\n")
+                                if tbl.get('headers'):
+                                    f.write(f"      Headers: {', '.join(tbl['headers'][:5])}\n")
+                        
+                        # Forms in iframe
+                        forms = components.get('forms', [])
+                        if forms:
+                            f.write(f"\n  FORMS ({len(forms)}):\n")
+                            for frm in forms:
+                                f.write(f"    • {frm.get('id', 'unnamed')} → {frm.get('action', 'N/A')}\n")
+                                f.write(f"      Inputs: {len(frm.get('inputs', []))}\n")
         
         # Move screenshots to app-specific directory
         import glob
@@ -918,7 +1225,7 @@ class UIExtractor:
             f.write(f"# UI Extraction — {app_name}\n\n")
             f.write(f"- Date: {datetime.now().strftime('%Y-%m-%d %H:%M:%S')}\n")
             f.write(f"- Pages: {len(self.extracted_pages)}\n")
-            f.write(f"- Buttons: {total_buttons} — Forms: {total_forms} — Tables: {total_tables} — Icons: {total_icons}\n\n")
+            f.write(f"- Buttons: {total_buttons} — Forms: {total_forms} — Tables: {total_tables} — Icons: {total_icons} — Iframes: {total_iframes}\n\n")
             f.write(f"Artifacts:\n\n")
             f.write(f"- 00_SUMMARY.txt — high-level overview\n")
             f.write(f"- full_extraction.json — structured data for programmatic use\n")
