@@ -9,6 +9,7 @@ An AI agent that automatically crawls web applications, handles authentication, 
 - Component properties, positions, styling, and relationships
 - Functional analysis (what each component does)
 - Page structure, navigation, and hierarchy
+- **NEW**: Iframe content extraction (embedded dashboards, widgets, KPIs)
 
 🔐 **Authentication Support**
 - Handles login pages with configurable selectors
@@ -25,6 +26,12 @@ An AI agent that automatically crawls web applications, handles authentication, 
 - JSON data (programmatic access)
 - Organized by page with summary
 
+🎯 **NEW: Specification Converter**
+- Converts technical UI extractions to functional specifications
+- Technology-agnostic requirements for any tech stack
+- Generates feature breakdowns, data models, and user stories
+- Perfect for developers, AI agents, and product managers
+
 ## Quick Links
 
 📁 **Repository Structure:**
@@ -38,12 +45,15 @@ An AI agent that automatically crawls web applications, handles authentication, 
 - [Quick Start Guide](docs/QUICKSTART.md) - Get started in 5 minutes
 - [Usage Methods](docs/USAGE_METHODS.md) - Web UI vs Script comparison
 - [Extraction Guide](docs/EXTRACTION_GUIDE.md) - Detailed extraction info
+- [Specification Converter Guide](SPEC_CONVERTER_GUIDE.md) - Convert to functional specs
+- [Iframe Extraction](docs/IFRAME_EXTRACTION.md) - Extract from embedded content
 - [Troubleshooting](docs/TROUBLESHOOTING_WEB_UI.md) - Common issues & solutions
 
 🔧 **Common Commands:**
 ```bash
 python3 utilities/verify_setup.py           # Verify installation
-python3 tests/run_extraction.py             # Run extraction
+python3 tests/run_extraction.py             # Run UI extraction
+python3 run_spec_converter.py               # Convert to functional specs
 python3 tests/test_agent_tool.py            # Test agent/tool
 ```
 
@@ -179,6 +189,44 @@ extraction/
     ├── screenshot_1.png             # Page 2 screenshot
     └── full_extraction.json         # Complete data in JSON
 ```
+
+## Complete Workflow: Extract → Convert → Build
+
+### 1. Extract UI (Technical Details)
+```bash
+python3 tests/run_extraction.py
+```
+Output: `extraction/YourApp_<timestamp>/`
+
+### 2. Convert to Functional Specs (Requirements)
+```bash
+python3 run_spec_converter.py
+```
+Or:
+```python
+from ai_pixel_parse import convert_to_functional_spec_tool
+
+specs = await convert_to_functional_spec_tool(
+    app_name="YourApp",
+    domain="e-commerce platform",
+    target_audience="AI agents and developers"
+)
+```
+Output: `functional_specs/YourApp_spec_<timestamp>/`
+- `YourApp_functional_spec.md` - Business requirements
+- `YourApp_features.md` - Feature breakdown
+- `YourApp_data_models.md` - Data structures
+- `YourApp_user_stories.md` - User stories
+- `README.md` - Usage guide
+
+### 3. Build Application
+Use the functional specifications to:
+- Generate code with AI (Claude, GPT-4, etc.)
+- Hand to development team
+- Create architecture plans
+- Generate test cases
+
+**See [SPEC_CONVERTER_GUIDE.md](SPEC_CONVERTER_GUIDE.md) for complete workflow details.**
 
 ### Specification File Format
 

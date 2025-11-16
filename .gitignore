@@ -14,6 +14,7 @@ build/
 
 # Extraction output
 extraction/
+functional_specs/
 
 # Screenshots
 *.png
